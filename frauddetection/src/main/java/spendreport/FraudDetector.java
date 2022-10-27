@@ -35,13 +35,19 @@ public class FraudDetector extends KeyedProcessFunction<Long, Transaction, Alert
 	private static final long ONE_MINUTE = 60 * 1000;
 
 	private transient ValueState<Boolean> flagState;
+	private transient ValueState<Boolean> timerState;
 
 	@Override
 	public void open(Configuration parameters){
 		ValueStateDescriptor<Boolean> flagDescriptor = new ValueStateDescriptor<>(
 			"flag", Types.BOOLEAN);
-			flagState = getRuntimeContext().getState(flagDescriptor);
-		)
+		flagState = getRuntimeContext().getState(flagDescriptor);
+
+		ValueStateDescriptor<Long> timerDescriptor = new ValueStateDescriptor<>(
+			"timer-state",
+			Types.LONG
+		);
+		timerState= getRuntimeContext().getState(timerDescriptor);
 	}
 
 	@Override
@@ -69,7 +75,27 @@ public class FraudDetector extends KeyedProcessFunction<Long, Transaction, Alert
 		if( transaction.getAmount() < SMALL_AMOUNT){
 			//set flag to true
 			flagState.update(true);
-		}
 
+
+			//set  the timer and timer State
+			long timer = context.timerService().currentProcessingTime() + ONE_MINUTE;
+			context.timerService().registerProcessingTimeTimer(timer);
+			timerState.update(timer);
+		}
+	}
+
+	@Override
+	public void onTimer(long timestamp, onTimerContext ctx, Collector<Alert> out){
+		timerState.clear();
+		flagState.clear();
+	}
+
+	public void cleanUp(Context ctx) throws Exception{
+		Long timer = timerState.value();
+		ctx.timerService().deleteProcessingTimeTimer(timer);
+
+		//Clean up all state
+		timerState.clear();
+		flagState.clear();
 	}
 }
